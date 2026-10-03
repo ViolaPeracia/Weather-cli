@@ -162,5 +162,5 @@ func main() {
 	}
 
 	// 6. Render beautiful ASCII widget
-	display.RenderWeather(targetName, data)
+	display.RenderWeather(os.Stdout, targetName, data)
 }

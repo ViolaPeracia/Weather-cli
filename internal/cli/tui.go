@@ -95,17 +95,7 @@ func runTUI(stdin io.Reader, stdout io.Writer, cfg config.Config) {
 			}
 
 			if loadSuccess && errorMessage == "" {
-				// Capture display output and route to stdout stream
-				// Since display.RenderWeather prints directly to os.Stdout, we redirect it
-				oldStdout := os.Stdout
-				r, w, _ := os.Pipe()
-				os.Stdout = w
-
-				display.RenderWeather(resolvedName, data)
-
-				w.Close()
-				os.Stdout = oldStdout
-				_, _ = io.Copy(stdout, r)
+				display.RenderWeather(stdout, resolvedName, data)
 			}
 		}
 

@@ -1,7 +1,13 @@
+// Package display renders weather data as ASCII widgets for the terminal.
+//
+// Color is enabled by default. Setting the NO_COLOR environment variable to a
+// non-empty value (https://no-color.org) disables every ANSI escape sequence,
+// which keeps the output readable in pipes, logs and pagers.
 package display
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"unicode/utf8"
@@ -19,10 +25,36 @@ const (
 	ColorBold   = "\033[1m"
 )
 
-var boxWidth = 50 // Default baseline width, can be expanded dynamically
+const (
+	// baseBoxWidth is the minimum inner width of the ASCII widget; it grows to
+	// fit the widest row when location names or conditions are longer.
+	baseBoxWidth = 50
+	// condWidth pads the condition column of a forecast row so the low/high
+	// temperatures line up across rows.
+	condWidth = 16
+)
+
+// colorEnabled reports whether ANSI colors should be emitted. Colors are on by
+// default and turned off whenever NO_COLOR is set to a non-empty value.
+func colorEnabled() bool {
+	return os.Getenv("NO_COLOR") == ""
+}
+
+// colorize wraps s in an ANSI color sequence, or returns s unchanged when
+// colors are disabled.
+func colorize(color, s string) string {
+	if !colorEnabled() {
+		return s
+	}
+	return color + s + ColorReset
+}
 
 // PrintError formats and prints error messages to Stderr.
 func PrintError(err error) {
+	if !colorEnabled() {
+		fmt.Fprintf(os.Stderr, "✖ Error: %v\n", err)
+		return
+	}
 	fmt.Fprintf(os.Stderr, "%s%s✖ Error:%s %v\n", ColorBold, ColorRed, ColorReset, err)
 }
 
@@ -37,39 +69,108 @@ func formatTemp(temp float64, unit string) (string, string) {
 	}
 
 	if celsiusTemp <= 15 {
-		return raw, ColorBlue + raw + ColorReset
+		return raw, colorize(ColorBlue, raw)
 	} else if celsiusTemp <= 27 {
-		return raw, ColorGreen + raw + ColorReset
+		return raw, colorize(ColorGreen, raw)
 	}
-	return raw, ColorRed + raw + ColorReset
+	return raw, colorize(ColorRed, raw)
 }
 
 // formatHumidity colorizes the humidity.
 func formatHumidity(hum int) (string, string) {
 	raw := fmt.Sprintf("%d%%", hum)
-	return raw, ColorCyan + raw + ColorReset
+	return raw, colorize(ColorCyan, raw)
 }
 
 // formatConditions colorizes the conditions.
 func formatConditions(cond string, icon string) (string, string) {
 	raw := fmt.Sprintf("%s %s", icon, cond)
-	return raw, ColorYellow + raw + ColorReset
+	return raw, colorize(ColorYellow, raw)
 }
 
-// printRow prints a padded row for the ASCII widget.
-func printRow(label, rawValue, coloredValue string) {
+// formatForecastRow builds a single forecast row.
+// It returns the plain string (used to measure the box width) and the
+// colorized string (used to render), so both always stay in sync.
+func formatForecastRow(f weather.DailyForecast, unit string) (string, string) {
+	// e.g., "2023-10-02" -> "10-02"
+	shortDate := f.Date
+	if len(shortDate) >= 5 {
+		shortDate = shortDate[5:]
+	}
+
+	rawMin, colMin := formatTemp(f.MinTemp, unit)
+	rawMax, colMax := formatTemp(f.MaxTemp, unit)
+
+	// Format: "10-02  󰖙 Clear sky" and "L:15.2°C  H:26.5°C"
+	// To ensure clean alignment, we pad the condition section
+	condRaw := fmt.Sprintf("%s %s", f.Icon, f.Conditions)
+	padCond := condWidth - utf8.RuneCountInString(condRaw)
+	if padCond < 0 {
+		padCond = 0
+	}
+	condPadded := condRaw + strings.Repeat(" ", padCond)
+
+	raw := fmt.Sprintf("%s  %s  L:%s  H:%s", shortDate, condPadded, rawMin, rawMax)
+	colored := fmt.Sprintf("%s%s%s  %s  L:%s  H:%s",
+		ColorCyan, shortDate, ColorReset, colorize(ColorYellow, condPadded), colMin, colMax)
+	return raw, colored
+}
+
+// printRow prints a padded row of width (excluding the borders) to w.
+func printRow(w io.Writer, width int, label, rawValue, coloredValue string) {
 	contentLen := utf8.RuneCountInString(label) + utf8.RuneCountInString(rawValue)
-	padding := boxWidth - contentLen
+	padding := width - contentLen
 	if padding < 0 {
 		padding = 0
 	}
-	fmt.Printf("│ %s%s%s │\n", label, coloredValue, strings.Repeat(" ", padding))
+	fmt.Fprintf(w, "│ %s%s%s │\n", label, coloredValue, strings.Repeat(" ", padding))
 }
 
-// RenderWeather prints the weather data and forecast inside a beautiful ASCII widget.
-func RenderWeather(locationName string, data weather.WeatherData) {
-	// Dynamically calculate box width based on inputs
-	width := 50
+// RenderWeather writes the weather data and forecast inside a beautiful ASCII
+// widget to w. The box width is derived from the content, so nothing is shared
+// between calls and the function is safe for concurrent use.
+func RenderWeather(w io.Writer, locationName string, data weather.WeatherData) {
+	width := boxContentWidth(locationName, data)
+
+	border := strings.Repeat("─", width+2)
+
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "╭%s╮\n", border)
+
+	// Header row
+	headerPrefix := " Weather for: "
+	printRow(w, width, headerPrefix, locationName, colorize(ColorBold, locationName))
+
+	fmt.Fprintf(w, "├%s┤\n", border)
+
+	// Data rows
+	rawT, colT := formatTemp(data.Temperature, data.Unit)
+	printRow(w, width, " Temperature: ", rawT, colT)
+
+	rawH, colH := formatHumidity(data.Humidity)
+	printRow(w, width, " Humidity:    ", rawH, colH)
+
+	rawC, colC := formatConditions(data.Conditions, data.Icon)
+	printRow(w, width, " Conditions:  ", rawC, colC)
+
+	// Forecast rows
+	if len(data.Forecast) > 0 {
+		fmt.Fprintf(w, "├%s┤\n", border)
+		printRow(w, width, " Forecast:    ", "", "")
+		for _, f := range data.Forecast {
+			rawF, colF := formatForecastRow(f, data.Unit)
+			printRow(w, width, "  ", rawF, colF)
+		}
+	}
+
+	fmt.Fprintf(w, "╰%s╯\n", border)
+	fmt.Fprintln(w)
+}
+
+// boxContentWidth returns the inner width needed to fit the header and every
+// row without breaking the right border.
+func boxContentWidth(locationName string, data weather.WeatherData) int {
+	width := baseBoxWidth
 
 	// Check location header length
 	headerLen := utf8.RuneCountInString(" Weather for: ") + utf8.RuneCountInString(locationName)
@@ -79,82 +180,12 @@ func RenderWeather(locationName string, data weather.WeatherData) {
 
 	// Check forecast rows if any
 	for _, f := range data.Forecast {
-		shortDate := f.Date
-		if len(shortDate) >= 5 {
-			shortDate = shortDate[5:]
-		}
-		rawMin, _ := formatTemp(f.MinTemp, data.Unit)
-		rawMax, _ := formatTemp(f.MaxTemp, data.Unit)
-		condRaw := fmt.Sprintf("%s %s", f.Icon, f.Conditions)
-		padCond := 16 - utf8.RuneCountInString(condRaw)
-		if padCond < 0 {
-			padCond = 0
-		}
-		condPadded := condRaw + strings.Repeat(" ", padCond)
-		rawF := fmt.Sprintf("%s  %s  L:%s  H:%s", shortDate, condPadded, rawMin, rawMax)
-
+		rawF, _ := formatForecastRow(f, data.Unit)
 		rowLen := utf8.RuneCountInString("  ") + utf8.RuneCountInString(rawF)
 		if rowLen > width {
 			width = rowLen
 		}
 	}
 
-	boxWidth = width
-
-	fmt.Println()
-	fmt.Printf("╭%s╮\n", strings.Repeat("─", boxWidth+2))
-
-	// Header row
-	headerPrefix := " Weather for: "
-	headerRawVal := locationName
-	printRow(headerPrefix, headerRawVal, ColorBold+headerRawVal+ColorReset)
-
-	fmt.Printf("├%s┤\n", strings.Repeat("─", boxWidth+2))
-
-	// Data rows
-	rawT, colT := formatTemp(data.Temperature, data.Unit)
-	printRow(" Temperature: ", rawT, colT)
-
-	rawH, colH := formatHumidity(data.Humidity)
-	printRow(" Humidity:    ", rawH, colH)
-
-	rawC, colC := formatConditions(data.Conditions, data.Icon)
-	printRow(" Conditions:  ", rawC, colC)
-
-	// Forecast rows
-	if len(data.Forecast) > 0 {
-		fmt.Printf("├%s┤\n", strings.Repeat("─", boxWidth+2))
-		printRow(" Forecast:    ", "", "")
-		for _, f := range data.Forecast {
-			// e.g., "2023-10-02" -> "10-02"
-			shortDate := f.Date
-			if len(shortDate) >= 5 {
-				shortDate = shortDate[5:]
-			}
-
-			rawMin, colMin := formatTemp(f.MinTemp, data.Unit)
-			rawMax, colMax := formatTemp(f.MaxTemp, data.Unit)
-
-			// Format: "10-02  󰖙 Clear sky" and "L:15.2°C  H:26.5°C"
-			// To ensure clean alignment, we pad the condition section
-			condRaw := fmt.Sprintf("%s %s", f.Icon, f.Conditions)
-			// Pad the condition to fixed 16 runes so Temps align nicely
-			padCond := 16 - utf8.RuneCountInString(condRaw)
-			if padCond < 0 {
-				padCond = 0
-			}
-			condPadded := condRaw + strings.Repeat(" ", padCond)
-
-			rawF := fmt.Sprintf("%s  %s  L:%s  H:%s", shortDate, condPadded, rawMin, rawMax)
-			
-			// Colored parts
-			condCol := ColorYellow + condPadded + ColorReset
-			colF := fmt.Sprintf("%s%s%s  %s  L:%s  H:%s", ColorCyan, shortDate, ColorReset, condCol, colMin, colMax)
-
-			printRow("  ", rawF, colF)
-		}
-	}
-
-	fmt.Printf("╰%s╯\n", strings.Repeat("─", boxWidth+2))
-	fmt.Println()
+	return width
 }
