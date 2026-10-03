@@ -2,6 +2,7 @@ package weather
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -10,6 +11,12 @@ import (
 
 var geocodeBaseURL = "https://geocoding-api.open-meteo.com"
 var weatherBaseURL = "https://api.open-meteo.com"
+
+// ErrCityNotFound reports that the geocoding API returned no match for the
+// requested city. Callers match it with errors.Is to tell an unknown city -
+// which may fall back to a configured default - apart from a transport or API
+// failure, whose cause is unrelated to the city name.
+var ErrCityNotFound = errors.New("city not found")
 
 // maxForecastDays caps the number of upcoming forecast days requested from
 // the API (Open-Meteo itself accepts up to 16).
@@ -80,7 +87,7 @@ func GeocodeCity(city string) (float64, float64, string, error) {
 	}
 
 	if len(geoResp.Results) == 0 {
-		return 0, 0, "", fmt.Errorf("city not found: %s", city)
+		return 0, 0, "", fmt.Errorf("%w: %s", ErrCityNotFound, city)
 	}
 
 	result := geoResp.Results[0]

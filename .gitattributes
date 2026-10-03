@@ -1,0 +1,28 @@
+# Normalize line endings so `gofmt -l .` stays a meaningful gate.
+#
+# Why this matters: gofmt rewrites CRLF to LF. If a Windows contributor clones
+# this repo with core.autocrlf=true (the Git for Windows default) and saves a
+# .go file, Git hands back a CRLF file, gofmt then lists every single one, and
+# the CI formatting gate fails on code that is otherwise correct. Pinning
+# eol=lf in the index makes the working tree agree with gofmt on every OS.
+#
+# Rules are listed per file type on purpose. A blanket `* text=auto` would make
+# Git guess for every file, including any future binary asset, and can corrupt
+# files it guesses wrong about. Only the text types this repo actually uses are
+# pinned here.
+
+# Go source and test files - governed by the gofmt gate in CI.
+*.go text eol=lf
+
+# CI workflow definitions
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Documentation
+*.md text eol=lf
+
+# Project config files
+.gitignore text eol=lf
+.gitattributes text eol=lf
+go.mod text eol=lf
+go.sum text eol=lf

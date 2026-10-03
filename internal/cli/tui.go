@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -9,9 +10,43 @@ import (
 
 	"github.com/ViolaPeracia/Weather-cli/internal/config"
 	"github.com/ViolaPeracia/Weather-cli/internal/display"
-	"github.com/ViolaPeracia/Weather-cli/internal/location"
 	"github.com/ViolaPeracia/Weather-cli/internal/weather"
 )
+
+// configCache adapts the config package's package-level cache functions to the
+// weather.CacheStore interface, mirroring the adapter used by cmd/weather, so
+// internal/weather stays free of an import cycle back into internal/config.
+type configCache struct{}
+
+func (configCache) LoadCache(lat, lon float64, unit string, days int) (weather.WeatherData, bool) {
+	entry, ok := config.LoadCache(lat, lon, unit, days)
+	if !ok {
+		return weather.WeatherData{}, false
+	}
+	return entry.WeatherData, true
+}
+
+func (configCache) SaveCache(lat, lon float64, locName, unit string, days int, data weather.WeatherData) error {
+	return config.SaveCache(lat, lon, locName, unit, days, data)
+}
+
+// tuiErrorFor maps a weather.Resolve failure to the TUI banner message and
+// reports whether the TUI must fall back to the configured default city.
+//
+// Only an unknown city is recoverable. IP-based location detection and every
+// other failure (network, HTTP status, decode) leave the city untouched.
+func tuiErrorFor(city string, resolveErr error) (message string, revertToDefault bool) {
+	switch {
+	case errors.Is(resolveErr, weather.ErrCityNotFound):
+		return fmt.Sprintf("City '%s' not found. Reverting...", city), true
+	case city == "":
+		// Resolve already labels this failure "failed to detect location: ...";
+		// unwrap once so the banner does not repeat that prefix.
+		return fmt.Sprintf("Failed to detect location: %v", errors.Unwrap(resolveErr)), false
+	default:
+		return fmt.Sprintf("Failed to fetch weather: %v", resolveErr), false
+	}
+}
 
 // StartTUI launches the interactive terminal user interface.
 func StartTUI(cfg config.Config) {
@@ -47,55 +82,17 @@ func runTUI(stdin io.Reader, stdout io.Writer, cfg config.Config) {
 		if showHelp {
 			renderHelpScreen(stdout)
 		} else {
-			// Resolve and fetch weather
-			var lat, lon float64
-			var resolvedName string
-			var data weather.WeatherData
-			var loadSuccess bool
-
-			if city == "" {
-				loc, err := location.DetectLocation()
-				if err != nil {
-					errorMessage = fmt.Sprintf("Failed to detect location: %v", err)
-				} else {
-					lat = loc.Lat
-					lon = loc.Lon
-					resolvedName = fmt.Sprintf("%s, %s", loc.City, loc.Country)
-					loadSuccess = true
+			// Resolve location (city name, or IP detection when blank), fetch
+			// through the cache, then render - a single call shared with main.
+			result, err := weather.Resolve(city, unit, forecastDays, false, configCache{})
+			if err != nil {
+				var revert bool
+				errorMessage, revert = tuiErrorFor(city, err)
+				if revert {
+					city = cfg.DefaultCity // Revert to config default
 				}
 			} else {
-				var err error
-				lat, lon, resolvedName, err = weather.GeocodeCity(city)
-				if err != nil {
-					errorMessage = fmt.Sprintf("City '%s' not found. Reverting...", city)
-					city = cfg.DefaultCity // Revert to config default
-				} else {
-					loadSuccess = true
-				}
-			}
-
-			if loadSuccess {
-				// Attempt to load from cache
-				var cacheHit bool
-				if cacheEntry, ok := config.LoadCache(lat, lon, unit, forecastDays); ok {
-					data = cacheEntry.WeatherData
-					cacheHit = true
-				}
-
-				if !cacheHit {
-					var err error
-					data, err = weather.FetchWeather(lat, lon, unit, forecastDays)
-					if err != nil {
-						errorMessage = fmt.Sprintf("Failed to fetch weather: %v", err)
-						loadSuccess = false
-					} else {
-						_ = config.SaveCache(lat, lon, resolvedName, unit, forecastDays, data)
-					}
-				}
-			}
-
-			if loadSuccess && errorMessage == "" {
-				display.RenderWeather(stdout, resolvedName, data)
+				display.RenderWeather(stdout, result.Name, result.Data)
 			}
 		}
 

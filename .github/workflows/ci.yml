@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+# Cancel superseded runs on the same ref instead of queueing them.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # The CLI emits ANSI box-drawing characters, writes files through
+        # path/filepath, and reads stdin in the TUI. Those are the three places
+        # Linux and Windows diverge, so every gate below runs on all three.
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    defaults:
+      run:
+        # bash is available on the Windows runner via Git for Windows, which
+        # keeps one script working on every OS in the matrix.
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          # setup-go caches the module cache and build cache keyed on go.sum.
+          cache: true
+
+      - name: Download modules
+        run: go mod download
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Check formatting (gofmt)
+        # gofmt -l prints one line per misformatted file and exits 0 either
+        # way, so the output has to be tested explicitly. This is the gate that
+        # catches CRLF reintroduction on Windows checkouts - see .gitattributes.
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::These files are not gofmt-formatted:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Test
+        run: go test -race ./... -count=1

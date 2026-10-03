@@ -9,9 +9,32 @@ import (
 	"github.com/ViolaPeracia/Weather-cli/internal/cli"
 	"github.com/ViolaPeracia/Weather-cli/internal/config"
 	"github.com/ViolaPeracia/Weather-cli/internal/display"
-	"github.com/ViolaPeracia/Weather-cli/internal/location"
 	"github.com/ViolaPeracia/Weather-cli/internal/weather"
 )
+
+// version is overridden at build time via -ldflags "-X main.version=1.2.0".
+var version = "dev"
+
+// maxForecastDays mirrors the help text: --forecast accepts 1-7, with 0 meaning
+// "current conditions only".
+const maxForecastDays = 7
+
+// configCache adapts the config package's package-level cache functions to the
+// weather.CacheStore interface, so internal/weather stays free of an import
+// cycle back into internal/config.
+type configCache struct{}
+
+func (configCache) LoadCache(lat, lon float64, unit string, days int) (weather.WeatherData, bool) {
+	entry, ok := config.LoadCache(lat, lon, unit, days)
+	if !ok {
+		return weather.WeatherData{}, false
+	}
+	return entry.WeatherData, true
+}
+
+func (configCache) SaveCache(lat, lon float64, locName, unit string, days int, data weather.WeatherData) error {
+	return config.SaveCache(lat, lon, locName, unit, days, data)
+}
 
 func main() {
 	// Parse CLI flags
@@ -28,8 +51,15 @@ func main() {
 	flag.Parse()
 
 	if *versionFlag {
-		fmt.Println("Weather CLI v1.0.0")
+		fmt.Println("Weather CLI v" + version)
 		os.Exit(0)
+	}
+
+	// Validate flag values at the boundary so bad input never reaches the
+	// lower layers (which would silently clamp it).
+	if err := validateForecastDays(*forecastFlag); err != nil {
+		display.PrintError(err)
+		os.Exit(1)
 	}
 
 	// 1. Load config
@@ -52,13 +82,11 @@ func main() {
 	}
 
 	if *configSetFlag != "" {
-		parts := strings.SplitN(*configSetFlag, "=", 2)
-		if len(parts) != 2 {
-			display.PrintError(fmt.Errorf("invalid config-set format. Expected key=value (e.g. city=Hanoi)"))
+		key, value, err := parseConfigSet(*configSetFlag)
+		if err != nil {
+			display.PrintError(err)
 			os.Exit(1)
 		}
-		key := strings.TrimSpace(parts[0])
-		value := strings.TrimSpace(parts[1])
 
 		switch key {
 		case "city":
@@ -101,31 +129,6 @@ func main() {
 		finalCity = cfg.DefaultCity
 	}
 
-	var targetLat, targetLon float64
-	var targetName string
-
-	if finalCity == "" {
-		// IP Detection
-		loc, err := location.DetectLocation()
-		if err != nil {
-			display.PrintError(err)
-			os.Exit(1)
-		}
-		targetLat = loc.Lat
-		targetLon = loc.Lon
-		targetName = fmt.Sprintf("%s, %s", loc.City, loc.Country)
-	} else {
-		// Geocoding
-		lat, lon, name, err := weather.GeocodeCity(finalCity)
-		if err != nil {
-			display.PrintError(err)
-			os.Exit(1)
-		}
-		targetLat = lat
-		targetLon = lon
-		targetName = name
-	}
-
 	// 4. Save Config if requested
 	if *saveConfigFlag {
 		newCfg := config.Config{
@@ -139,28 +142,41 @@ func main() {
 		}
 	}
 
-	// 5. Fetch weather data (check cache first)
-	var data weather.WeatherData
-	var cacheHit bool
-
-	if !*forceFlag {
-		if cacheEntry, ok := config.LoadCache(targetLat, targetLon, finalUnit, *forecastFlag); ok {
-			data = cacheEntry.WeatherData
-			cacheHit = true
-		}
-	}
-
-	if !cacheHit {
-		var err error
-		data, err = weather.FetchWeather(targetLat, targetLon, finalUnit, *forecastFlag)
-		if err != nil {
-			display.PrintError(err)
-			os.Exit(1)
-		}
-		// Save to cache (non-fatal if it fails)
-		_ = config.SaveCache(targetLat, targetLon, targetName, finalUnit, *forecastFlag, data)
+	// 5. Resolve location, then fetch weather (via cache when possible)
+	result, err := weather.Resolve(finalCity, finalUnit, *forecastFlag, *forceFlag, configCache{})
+	if err != nil {
+		display.PrintError(err)
+		os.Exit(1)
 	}
 
 	// 6. Render beautiful ASCII widget
-	display.RenderWeather(os.Stdout, targetName, data)
+	display.RenderWeather(os.Stdout, result.Name, result.Data)
+}
+
+// validateForecastDays rejects --forecast values outside 0-7, naming both the
+// offending value and the accepted range.
+func validateForecastDays(days int) error {
+	if days < 0 || days > maxForecastDays {
+		return fmt.Errorf("invalid forecast '%d'. Must be between 0 and %d (0 = current conditions only)", days, maxForecastDays)
+	}
+	return nil
+}
+
+// parseConfigSet splits a "key=value" argument and rejects malformed input or
+// an empty value, which would otherwise be swallowed silently.
+func parseConfigSet(arg string) (key string, value string, err error) {
+	parts := strings.SplitN(arg, "=", 2)
+	if len(parts) != 2 {
+		return "", "", fmt.Errorf("invalid config-set format. Expected key=value (e.g. city=Hanoi)")
+	}
+	key = strings.TrimSpace(parts[0])
+	value = strings.TrimSpace(parts[1])
+
+	if key == "" {
+		return "", "", fmt.Errorf("invalid config-set: missing key. Expected key=value (e.g. city=Hanoi)")
+	}
+	if value == "" {
+		return "", "", fmt.Errorf("invalid config-set: value for '%s' cannot be empty", key)
+	}
+	return key, value, nil
 }

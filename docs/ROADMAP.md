@@ -4,6 +4,20 @@ This document outlines the phased development plan for the Weather CLI project. 
 
 ---
 
+## Current Status
+
+All five planned phases are complete. The shipped CLI covers:
+
+- IP-based location detection via `https://ipwho.is/`, geocoding and forecasts via Open-Meteo. No API key needed.
+- `--city`, `--unit`, `--forecast`, `--force`, `--tui`, `--save-config`, `--config-show`, `--config-set` and `--version` flags.
+- A 10-minute local response cache at `~/.weather-cli/cache.json`, bypassable with `--force`.
+- Color-coded ASCII output with `NO_COLOR` support, sized by rune count so long city names do not break the box border.
+- Cross-platform CI (`.github/workflows/ci.yml`) gating every push and pull request with `go build`, `go vet`, `gofmt -l` and `go test -race` on Ubuntu, Windows and macOS.
+
+Ongoing work now comes from the [features tracker](FEATURES.md) rather than new roadmap phases. See [ROADMAP.md status notes](../.planning/ROADMAP.md) for milestone-level planning.
+
+---
+
 ## 🟢 Phase 1: Foundation (MVP) [COMPLETE]
 **Goal:** Establish the project structure and basic CLI interactions.
 
@@ -16,7 +30,7 @@ This document outlines the phased development plan for the Weather CLI project. 
 ## 🟢 Phase 2: Core Data Integration [COMPLETE]
 **Goal:** Connect to external services to fetch real data.
 
-- [x] **IP Geolocation Detection:** Implement logic in `internal/location` to auto-detect the user's city/coordinates if `--city` is not provided (using services like ip-api or ipify).
+- [x] **IP Geolocation Detection:** Implement logic in `internal/location` to auto-detect the user's city/coordinates if `--city` is not provided (using `https://ipwho.is/` over HTTPS).
 - [x] **Weather API Client:** Implement the HTTP client in `internal/weather` to call a weather service (e.g., OpenWeatherMap).
 - [x] **Data Parsing:** Unmarshal the JSON API responses into strongly typed Go structs.
 
@@ -51,4 +65,4 @@ This document outlines the phased development plan for the Weather CLI project. 
 
 ---
 
-> *Note: For a granular list of individual tasks and their current status, please refer to [features.md](features.md).*
+> *Note: For a granular list of individual tasks and their current status, please refer to [FEATURES.md](FEATURES.md).*

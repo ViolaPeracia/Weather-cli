@@ -15,4 +15,4 @@
 
 ## 3. Workflow & Interaction
 - **Respect Existing Code:** Do not remove existing features unless explicitly instructed by the user.
-- **Keep Docs Updated:** Automatically update `docs/features.md` whenever a feature is successfully implemented and verified. Update `docs/ARCHITECTURE.md` if package structure changes.
+- **Keep Docs Updated:** Automatically update `docs/FEATURES.md` whenever a feature is successfully implemented and verified. Update `docs/ARCHITECTURE.md` if package structure changes.

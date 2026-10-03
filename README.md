@@ -8,12 +8,14 @@ The project uses only the Go standard library and public JSON APIs.
 
 ## Features
 
-- Detects your current city and coordinates with IP geolocation when no city is provided.
+- Detects your current city and coordinates with IP geolocation (`https://ipwho.is/`, HTTPS) when no city is provided.
 - Looks up city coordinates with the Open-Meteo geocoding API.
 - Fetches current temperature, humidity, and weather conditions from Open-Meteo.
 - Supports Celsius and Fahrenheit output.
-- Supports optional multi-day forecasts.
-- Renders a formatted terminal weather panel with ANSI colors.
+- Supports optional multi-day forecasts (1 to 7 days).
+- Renders a formatted terminal weather panel with ANSI colors, honoring `NO_COLOR` for plain-text output.
+- Interactive TUI dashboard with live settings toggles (`--tui`).
+- Caches the last weather response locally for 10 minutes to avoid repeat API calls; bypass with `--force`.
 - Saves default city and unit preferences in a local JSON config file.
 
 ## Requirements
@@ -21,12 +23,18 @@ The project uses only the Go standard library and public JSON APIs.
 - Go 1.22 or newer
 - Network access for location, geocoding, and weather API calls
 
-No API key is required for the current Open-Meteo based implementation.
+No API key is required: Open-Meteo and ipwho.is are both free and unauthenticated.
 
 ## Build
 
 ```bash
 go build -o weather-cli ./cmd/weather
+```
+
+To inject a version string that `--version` will report:
+
+```bash
+go build -ldflags "-X main.version=v1.2.0" -o weather-cli ./cmd/weather
 ```
 
 On Windows PowerShell:
@@ -73,6 +81,25 @@ Show the version:
 ./weather-cli --version
 ```
 
+Launch the interactive TUI dashboard:
+
+```bash
+./weather-cli --tui
+```
+
+Bypass the local cache and always hit the network:
+
+```bash
+./weather-cli --city "Berlin" --force
+```
+
+Inspect or edit saved defaults:
+
+```bash
+./weather-cli --config-show
+./weather-cli --config-set city=Hanoi
+```
+
 ## Flags
 
 | Flag | Description |
@@ -81,7 +108,11 @@ Show the version:
 | `--unit` | Temperature unit. Accepted values: `celsius`, `fahrenheit`. |
 | `--forecast` | Number of forecast days to request, from 1 to 7. |
 | `--save-config` | Save the selected city and unit to the local config file. |
-| `--version` | Print the CLI version. |
+| `--force` | Skip the local cache and always fetch fresh weather data. |
+| `--tui` | Start the interactive terminal dashboard instead of printing a single report. |
+| `--config-show` | Print the current default city and unit, then exit. |
+| `--config-set` | Set a default preference as `key=value`. Supported keys: `city`, `unit`. Then exit. |
+| `--version` | Print the CLI version and exit. |
 
 ## Configuration
 
@@ -102,19 +133,31 @@ Example:
 
 Configuration is optional. Without a saved city, Weather CLI attempts IP-based location detection.
 
+The last weather response is cached at `~/.weather-cli/cache.json` for 10 minutes, keyed by coordinates, unit and forecast length. Use `--force` to skip it.
+
+To disable all ANSI colors (for pipes, logs or pagers), set the `NO_COLOR` environment variable to any non-empty value:
+
+```bash
+NO_COLOR=1 ./weather-cli --city "Oslo"
+```
+
+See [Configuration](docs/CONFIGURATION.md) for the full details.
+
 ## Development
 
-Run all tests:
+Run all tests, matching CI:
 
 ```bash
-go test ./...
+go test -race ./... -count=1
 ```
 
-Format Go files:
+Check formatting (must print nothing):
 
 ```bash
-gofmt -w ./cmd ./internal
+gofmt -l .
 ```
+
+Continuous integration is defined in `.github/workflows/ci.yml`. It runs on every push and pull request across Ubuntu, Windows and macOS, and enforces `go build ./...`, `go vet ./...`, `gofmt -l .` and `go test -race ./... -count=1`.
 
 ## Documentation
 

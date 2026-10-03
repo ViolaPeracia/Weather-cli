@@ -16,7 +16,7 @@ To build a CLI tool that fetches and displays current weather data based on the 
 3. **Terminal Display:** Parse the JSON response and render it beautifully in the terminal.
 
 ## Current Focus
-Review `docs/features.md` to understand what is currently implemented. Your immediate goal is to fulfill any unchecked boxes in the 'Work in Progress' or 'Planned Features' section while adhering strictly to `AI_POLICY_RULES.md`.
+Review `docs/FEATURES.md` to understand what is currently implemented. Your immediate goal is to fulfill any unchecked boxes in the 'Work in Progress' or 'Planned Features' section while adhering strictly to `AI_POLICY_RULES.md`.
 
 ## Go-Specific Directives
 - **Project Structure:** Use the standard Go layout (e.g., `cmd/weather/main.go` and `internal/` packages). See `docs/ARCHITECTURE.md`.
