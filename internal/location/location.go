@@ -9,26 +9,35 @@ import (
 
 // Location represents the geographic location of the user.
 type Location struct {
-	City        string  `json:"city"`
-	Country     string  `json:"country"`
-	Lat         float64 `json:"lat"`
-	Lon         float64 `json:"lon"`
-	Coordinates string  // Formatted string if needed
+	City    string  `json:"city"`
+	Country string  `json:"country"`
+	Lat     float64 `json:"lat"`
+	Lon     float64 `json:"lon"`
 }
 
-// IPApiResponse maps the JSON response from ip-api.com
+// IPApiResponse maps the JSON response from ipwho.is
 type IPApiResponse struct {
-	Status      string  `json:"status"`
+	Success     bool    `json:"success"`
+	IP          string  `json:"ip"`
 	Country     string  `json:"country"`
+	CountryCode string  `json:"country_code"`
 	City        string  `json:"city"`
-	Lat         float64 `json:"lat"`
-	Lon         float64 `json:"lon"`
+	Latitude    float64 `json:"latitude"`
+	Longitude   float64 `json:"longitude"`
 	Message     string  `json:"message"`
+	Reason      string  `json:"reason"`
 }
 
-var apiURL = "http://ip-api.com/json/"
+// defaultAPIURL is the production geolocation endpoint. It must stay HTTPS.
+const defaultAPIURL = "https://ipwho.is/"
 
-// DetectLocation uses ip-api.com to detect the user's location based on their IP address.
+// apiURL is a package-level var so tests can override it with an httptest
+// server. Do NOT downgrade it to plain HTTP: that would leak the user's IP
+// address in cleartext and let a network attacker forge the response.
+var apiURL = defaultAPIURL
+
+// DetectLocation uses ipwho.is over HTTPS to detect the user's location based
+// on their IP address.
 func DetectLocation() (Location, error) {
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Get(apiURL)
@@ -46,15 +55,18 @@ func DetectLocation() (Location, error) {
 		return Location{}, fmt.Errorf("failed to decode IP geolocation response: %w", err)
 	}
 
-	if ipResp.Status != "success" {
-		return Location{}, fmt.Errorf("IP geolocation failed: %s", ipResp.Message)
+	if !ipResp.Success {
+		detail := ipResp.Message
+		if detail == "" {
+			detail = ipResp.Reason
+		}
+		return Location{}, fmt.Errorf("IP geolocation failed: %s", detail)
 	}
 
 	return Location{
-		City:        ipResp.City,
-		Country:     ipResp.Country,
-		Lat:         ipResp.Lat,
-		Lon:         ipResp.Lon,
-		Coordinates: fmt.Sprintf("%f, %f", ipResp.Lat, ipResp.Lon),
+		City:    ipResp.City,
+		Country: ipResp.Country,
+		Lat:     ipResp.Latitude,
+		Lon:     ipResp.Longitude,
 	}, nil
 }

@@ -11,6 +11,9 @@ import (
 var geocodeBaseURL = "https://geocoding-api.open-meteo.com"
 var weatherBaseURL = "https://api.open-meteo.com"
 
+// maxForecastDays caps the number of upcoming forecast days requested from
+// the API (Open-Meteo itself accepts up to 16).
+const maxForecastDays = 7
 
 // DailyForecast represents the forecast for a single day.
 type DailyForecast struct {
@@ -86,7 +89,9 @@ func GeocodeCity(city string) (float64, float64, string, error) {
 }
 
 // FetchWeather fetches weather data for a given latitude and longitude using Open-Meteo API.
-// unit should be "celsius" or "fahrenheit". days is the number of forecast days (0-7).
+// unit should be "celsius" or "fahrenheit". days is the number of UPCOMING forecast days (0-7);
+// today's conditions are returned via the current fields, so days=0 yields no forecast rows.
+// Values outside 0-7 are clamped defensively.
 func FetchWeather(lat, lon float64, unit string, days int) (WeatherData, error) {
 	tempUnit := ""
 	unitSymbol := "C"
@@ -95,9 +100,19 @@ func FetchWeather(lat, lon float64, unit string, days int) (WeatherData, error) 
 		unitSymbol = "F"
 	}
 
+	// The forecast panel already shows today's current conditions, so it must
+	// contain only upcoming days. Open-Meteo's forecast_days=N includes today,
+	// therefore request N+1 entries and drop the first one.
+	if days < 0 {
+		days = 0
+	}
+	if days > maxForecastDays {
+		days = maxForecastDays
+	}
+
 	forecastQuery := ""
 	if days > 0 {
-		forecastQuery = fmt.Sprintf("&daily=temperature_2m_max,temperature_2m_min,weather_code&forecast_days=%d", days)
+		forecastQuery = fmt.Sprintf("&daily=temperature_2m_max,temperature_2m_min,weather_code&forecast_days=%d", days+1)
 	}
 
 	apiURL := fmt.Sprintf("%s/v1/forecast?latitude=%f&longitude=%f&current=temperature_2m,relative_humidity_2m,weather_code%s%s", weatherBaseURL, lat, lon, tempUnit, forecastQuery)
@@ -122,9 +137,23 @@ func FetchWeather(lat, lon float64, unit string, days int) (WeatherData, error) 
 	conditions, icon := decodeWeatherCode(current.WeatherCode)
 
 	var forecasts []DailyForecast
-	if days > 0 && len(weatherResp.Daily.Time) > 0 {
-		startIdx := 1
-		for i := startIdx; i < len(weatherResp.Daily.Time); i++ {
+	if days > 0 {
+		// The API's parallel daily arrays can come back with unequal lengths
+		// (partial responses, upstream/proxy glitches). Only trust the prefix
+		// that exists in every array.
+		safeLen := len(weatherResp.Daily.Time)
+		for _, series := range []int{
+			len(weatherResp.Daily.Temperature2mMax),
+			len(weatherResp.Daily.Temperature2mMin),
+			len(weatherResp.Daily.WeatherCode),
+		} {
+			if series < safeLen {
+				safeLen = series
+			}
+		}
+
+		// Index 0 is today, which is already rendered as the current panel.
+		for i := 1; i < safeLen; i++ {
 			fCond, fIcon := decodeWeatherCode(weatherResp.Daily.WeatherCode[i])
 			forecasts = append(forecasts, DailyForecast{
 				Date:       weatherResp.Daily.Time[i],

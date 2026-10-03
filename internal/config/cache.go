@@ -17,6 +17,7 @@ type CacheEntry struct {
 	Lon         float64             `json:"lon"`
 	Location    string              `json:"location"`
 	Unit        string              `json:"unit"`
+	Days        int                 `json:"days"`
 	WeatherData weather.WeatherData `json:"weather_data"`
 	CachedAt    time.Time           `json:"cached_at"`
 }
@@ -31,7 +32,7 @@ func getCachePath() (string, error) {
 }
 
 // SaveCache writes weather data to cache.json.
-func SaveCache(lat, lon float64, locName string, unit string, data weather.WeatherData) error {
+func SaveCache(lat, lon float64, locName string, unit string, days int, data weather.WeatherData) error {
 	path, err := getCachePath()
 	if err != nil {
 		return err
@@ -47,6 +48,7 @@ func SaveCache(lat, lon float64, locName string, unit string, data weather.Weath
 		Lon:         lon,
 		Location:    locName,
 		Unit:        unit,
+		Days:        days,
 		WeatherData: data,
 		CachedAt:    time.Now(),
 	}
@@ -63,8 +65,8 @@ func SaveCache(lat, lon float64, locName string, unit string, data weather.Weath
 	return nil
 }
 
-// LoadCache reads cached data. Returns entry and true if cache exists, is valid for same coords & unit, and is under 10 minutes old.
-func LoadCache(lat, lon float64, unit string) (CacheEntry, bool) {
+// LoadCache reads cached data. Returns entry and true if cache exists, is valid for same coords, unit & forecast days, and is under 10 minutes old.
+func LoadCache(lat, lon float64, unit string, days int) (CacheEntry, bool) {
 	path, err := getCachePath()
 	if err != nil {
 		return CacheEntry{}, false
@@ -90,7 +92,12 @@ func LoadCache(lat, lon float64, unit string) (CacheEntry, bool) {
 		return CacheEntry{}, false
 	}
 
-	// 3. Check coordinates match (within small delta, e.g. 0.01 degrees)
+	// 3. Check forecast days requested matches
+	if entry.Days != days {
+		return CacheEntry{}, false
+	}
+
+	// 4. Check coordinates match (within small delta, e.g. 0.01 degrees)
 	const delta = 0.01
 	if math.Abs(entry.Lat-lat) > delta || math.Abs(entry.Lon-lon) > delta {
 		return CacheEntry{}, false

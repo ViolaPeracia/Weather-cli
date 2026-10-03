@@ -144,7 +144,7 @@ func main() {
 	var cacheHit bool
 
 	if !*forceFlag {
-		if cacheEntry, ok := config.LoadCache(targetLat, targetLon, finalUnit); ok {
+		if cacheEntry, ok := config.LoadCache(targetLat, targetLon, finalUnit, *forecastFlag); ok {
 			data = cacheEntry.WeatherData
 			cacheHit = true
 		}
@@ -158,7 +158,7 @@ func main() {
 			os.Exit(1)
 		}
 		// Save to cache (non-fatal if it fails)
-		_ = config.SaveCache(targetLat, targetLon, targetName, finalUnit, data)
+		_ = config.SaveCache(targetLat, targetLon, targetName, finalUnit, *forecastFlag, data)
 	}
 
 	// 6. Render beautiful ASCII widget

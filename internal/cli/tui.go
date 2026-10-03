@@ -77,7 +77,7 @@ func runTUI(stdin io.Reader, stdout io.Writer, cfg config.Config) {
 			if loadSuccess {
 				// Attempt to load from cache
 				var cacheHit bool
-				if cacheEntry, ok := config.LoadCache(lat, lon, unit); ok {
+				if cacheEntry, ok := config.LoadCache(lat, lon, unit, forecastDays); ok {
 					data = cacheEntry.WeatherData
 					cacheHit = true
 				}
@@ -89,7 +89,7 @@ func runTUI(stdin io.Reader, stdout io.Writer, cfg config.Config) {
 						errorMessage = fmt.Sprintf("Failed to fetch weather: %v", err)
 						loadSuccess = false
 					} else {
-						_ = config.SaveCache(lat, lon, resolvedName, unit, data)
+						_ = config.SaveCache(lat, lon, resolvedName, unit, forecastDays, data)
 					}
 				}
 			}
